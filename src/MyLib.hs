@@ -6,28 +6,43 @@ module MyLib (someFunc) where
 
 import Control.Monad ((>=>))
 import Data.Bifunctor (Bifunctor (first))
-import Data.Kind (Type)
+import Data.Functor.Identity (Identity (..))
+import Data.Kind (Constraint, Type)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy (..))
+import GHC.TypeLits (ErrorMessage (..), TypeError)
 
-data FFree f a where
-  Pure :: a -> FFree f a
-  Impure :: Union f x -> (x -> FFree f a) -> FFree f a
+-- data Union (rs :: NonEmpty (Type -> Type)) (v :: Type) where
+--   Last :: Union (Identity ':| '[]) v
+--   Here :: r v -> Union rs v
+--   There :: Union (r ':| rs) v -> Union (r' ':| (r ': rs)) v
+-- instance {-# OVERLAPPING #-} Inj x (x ':| xs) where
+--   inj = Here
+-- instance (Inj x (x' ':| xs)) => Inj x (y ':| (x' ': xs)) where
+--   inj = There . inj
+-- instance Prj x (x ':| (x' ': xs)) (x' ':| xs) where
+--   prj _ (Here x) = Left x
+--   prj _ (There xs) = Right xs
+-- instance Prj x (x ':| '[]) (Identity ':| '[]) where
+--   prj _ (Here x) = Left x
+--   prj _ (There xs) = Right xs
+-- instance
+--   (PrjF x (y ':| (y' ': xs)) ~ Cons y (PrjF x (y' ':| xs))
+--   , ys' ~ Cons y (PrjF x (y' ':| xs))
+--   , Prj x (y' ':| xs) (y' ':| ys)) => Prj x (y ':| (y' ': xs)) ys' where
+--   -- instance (Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
+--   prj _ (Here x) = Right (inj x)
+--   prj p (There xs) = There <$> prj p xs
+-- type family PrjF x xs where
+--   PrjF x (x ':| (x' ': xs)) = (x' :| xs)
+--   PrjF x (x ':| '[]) = Identity ':| '[]
+--   PrjF x (y ':| (y' ': xs)) = Cons y (PrjF x (y' ':| xs))
+--   PrjF x (y ':| '[]) = TypeError (Text "Prj error")
+-- type family Cons x xs where
+--   Cons x (y ':| ys) = x ':| (y ': ys)
 
-instance Functor (FFree f) where
-  fmap f (Pure x) = Pure (f x)
-  fmap f (Impure x g) = Impure x (fmap f . g)
-
-instance Applicative (FFree f) where
-  f <*> Pure x = ($ x) <$> f
-  f <*> Impure x g = Impure x ((f <*>) . g)
-  pure = Pure
-
-instance Monad (FFree f) where
-  Pure x >>= f = f x
-  Impure x g >>= f = Impure x (g >=> f)
-
-data Union (r :: [Type -> Type]) (v :: Type) where
-  Here :: x v -> Union (x ': r) v
+data Union (rs :: [Type -> Type]) (v :: Type) where
+  Here :: r v -> Union (r ': rs) v
   There :: Union rs v -> Union (r ': rs) v
 
 class Inj x xs where
@@ -39,41 +54,75 @@ instance {-# OVERLAPPING #-} Inj x (x ': xs) where
 instance (Inj x xs) => Inj x (y ': xs) where
   inj = There . inj
 
+instance (TypeError (Text "Inj error")) => Inj x '[] where
+  inj = error "unreachable"
+
 class (PrjF x xs ~ ys) => Prj x xs ys where
   prj :: Proxy x -> Union xs v -> Either (x v) (Union ys v)
 
 type family PrjF x xs where
   PrjF x (x ': xs) = xs
   PrjF x (y ': xs) = y ': PrjF x xs
+  PrjF x '[] = TypeError (Text "Prj error")
 
 instance Prj x (x ': xs) xs where
   prj _ (Here x) = Left x
   prj _ (There xs) = Right xs
 
 instance (PrjF x (y ': xs) ~ (y ': ys), Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
+  -- instance (Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
   prj _ (Here x) = Right (inj x)
   prj p (There xs) = There <$> prj p xs
+
+instance (PrjF x '[] ~ ys, TypeError (Text "Prj error")) => Prj x '[] ys where
+  prj = error "unreachable"
 
 class (Prj x xs (PrjF x xs), Inj x xs) => Member x xs
 
 instance (Prj x xs (PrjF x xs), Inj x xs) => Member x xs
 
-data Tele a where
-  TellStr :: String -> Tele ()
-  GetLine :: Tele String
+type family Members (xs :: [Type -> Type]) (ys :: [Type -> Type]) :: Constraint where
+  Members '[] ys = ()
+  Members (x ': xs) ys = (Member x ys, Members xs ys)
 
-interpretTele :: Tele a -> IO a
-interpretTele (TellStr s) = Prelude.putStr s
-interpretTele GetLine = Prelude.getLine
+data FFree (fs :: [Type -> Type]) (a :: Type) where
+  Pure :: a -> FFree fs a
+  Impure :: Union fs x -> (x -> FFree fs a) -> FFree fs a
+
+instance Functor (FFree fs) where
+  fmap f (Pure x) = Pure (f x)
+  fmap f (Impure x g) = Impure x (fmap f . g)
+
+instance Applicative (FFree fs) where
+  f <*> Impure x g = Impure x ((f <*>) . g)
+  f <*> Pure x = ($ x) <$> f
+  pure = Pure
+
+instance Monad (FFree f) where
+  Pure x >>= f = f x
+  Impure x g >>= f = Impure x (g >=> f)
+
+data Tele a where
+  PutStr :: String -> Tele ()
+  GetLine :: Tele String
 
 liftFree :: (Member f r) => f a -> FFree r a
 liftFree x = Impure (inj x) pure
 
-teleTellStr :: (Member Tele r) => String -> FFree r ()
-teleTellStr = liftFree . TellStr
+tPutStr :: (Member Tele r) => String -> FFree r ()
+tPutStr = liftFree . PutStr
 
-teleGetLine :: (Member Tele r) => FFree r String
-teleGetLine = liftFree GetLine
+tGetLine :: (Member Tele r) => FFree r String
+tGetLine = liftFree GetLine
+
+runTele ::
+  FFree '[Tele] a ->
+  IO a
+runTele (Pure x) = pure x
+runTele (Impure fx g) = case prj (Proxy :: Proxy Tele) fx of
+  Left (PutStr s) -> putStr s >> runTele (g ())
+  Left GetLine -> getLine >>= runTele . g
+  Right _ -> error "unreachable"
 
 data Reader i x where
   Ask :: Reader i i
@@ -83,7 +132,7 @@ ask = liftFree Ask
 
 runReader ::
   forall i rs a.
-  (Prj (Reader i) (Reader i ': rs) rs) =>
+  (Member (Reader i) (Reader i ': rs)) =>
   i ->
   FFree (Reader i ': rs) a ->
   FFree rs a
@@ -100,7 +149,7 @@ tell = liftFree . Tell
 
 runWriter ::
   forall o rs a.
-  (Monoid o, Prj (Writer o) (Writer o ': rs) rs) =>
+  (Monoid o, Member (Writer o) (Writer o ': rs)) =>
   FFree (Writer o ': rs) a ->
   FFree rs (o, a)
 runWriter (Pure x) = pure (mempty, x)
@@ -110,11 +159,11 @@ runWriter (Impure fx g) = case prj (Proxy :: Proxy (Writer o)) fx of
 
 data State s x where
   SGet :: Reader s x -> State s x
-  SPut :: Writer s x -> State s x
+  SPut :: !(Writer s x) -> State s x
 
 runState ::
   forall s rs a.
-  (Prj (State s) (State s ': rs) rs) =>
+  (Member (State s) (State s ': rs)) =>
   s ->
   FFree (State s ': rs) a ->
   FFree rs (s, a)
@@ -135,13 +184,31 @@ modify f = get >>= put . f
 
 run :: FFree '[] a -> a
 run (Pure x) = x
-run _ = undefined
+run _ = error "unreachable"
 
-someFunc :: IO ()
--- someFunc = runFree runTele $ tell =<< get
-someFunc = print $ run $ runState (456 :: Int) $ runWriter @String $ runReader (123 :: Int) $ do
+runM :: (Monad m) => FFree '[m] a -> m a
+runM (Pure x) = pure x
+runM (Impure fx g) = case prj (Proxy :: Proxy m) fx of
+  Left l -> l >>= runM . g
+  Right _ -> error "unreachable"
+
+-- testFunc :: (Members '[State Int, Reader Int, Writer String, Tele] r) => FFree r Int
+testFunc = do
   x <- ask @Int
   y <- get @Int
   tell $ show (x + y)
+  z <- tGetLine
+  tPutStr z
+  tPutStr "\n"
   modify @Int (+ 10000)
-  tell "Hello"
+  tell $ "Hello" ++ z
+  get @Int
+
+someFunc :: IO ()
+someFunc = do
+  s <- runTele
+        . runWriter @String
+        . runState (456 :: Int)
+        . runReader (123 :: Int)
+        $ testFunc
+  print s
