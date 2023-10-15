@@ -1,45 +1,18 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module MyLib (someFunc) where
 
 import Control.Monad ((>=>))
+import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.ST (RealWorld, ST, stToIO)
 import Data.Bifunctor (Bifunctor (first))
-import Data.Functor.Identity (Identity (..))
 import Data.Kind (Constraint, Type)
-import Data.List.NonEmpty (NonEmpty (..))
 import Data.Proxy (Proxy (..))
+import Data.STRef (modifySTRef, newSTRef, readSTRef)
 import GHC.TypeLits (ErrorMessage (..), TypeError)
-
--- data Union (rs :: NonEmpty (Type -> Type)) (v :: Type) where
---   Last :: Union (Identity ':| '[]) v
---   Here :: r v -> Union rs v
---   There :: Union (r ':| rs) v -> Union (r' ':| (r ': rs)) v
--- instance {-# OVERLAPPING #-} Inj x (x ':| xs) where
---   inj = Here
--- instance (Inj x (x' ':| xs)) => Inj x (y ':| (x' ': xs)) where
---   inj = There . inj
--- instance Prj x (x ':| (x' ': xs)) (x' ':| xs) where
---   prj _ (Here x) = Left x
---   prj _ (There xs) = Right xs
--- instance Prj x (x ':| '[]) (Identity ':| '[]) where
---   prj _ (Here x) = Left x
---   prj _ (There xs) = Right xs
--- instance
---   (PrjF x (y ':| (y' ': xs)) ~ Cons y (PrjF x (y' ':| xs))
---   , ys' ~ Cons y (PrjF x (y' ':| xs))
---   , Prj x (y' ':| xs) (y' ':| ys)) => Prj x (y ':| (y' ': xs)) ys' where
---   -- instance (Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
---   prj _ (Here x) = Right (inj x)
---   prj p (There xs) = There <$> prj p xs
--- type family PrjF x xs where
---   PrjF x (x ':| (x' ': xs)) = (x' :| xs)
---   PrjF x (x ':| '[]) = Identity ':| '[]
---   PrjF x (y ':| (y' ': xs)) = Cons y (PrjF x (y' ':| xs))
---   PrjF x (y ':| '[]) = TypeError (Text "Prj error")
--- type family Cons x xs where
---   Cons x (y ':| ys) = x ':| (y ': ys)
 
 data Union (rs :: [Type -> Type]) (v :: Type) where
   Here :: r v -> Union (r ': rs) v
@@ -65,12 +38,15 @@ type family PrjF x xs where
   PrjF x (y ': xs) = y ': PrjF x xs
   PrjF x '[] = TypeError (Text "Prj error")
 
-instance Prj x (x ': xs) xs where
+instance (PrjF x (x ': xs) ~ xs) => Prj x (x ': xs) xs where
   prj _ (Here x) = Left x
   prj _ (There xs) = Right xs
 
-instance (PrjF x (y ': xs) ~ (y ': ys), Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
-  -- instance (Prj x xs ys) => Prj x (y ': xs) (y ': ys) where
+instance
+  {-# INCOHERENT #-}
+  (PrjF x (y ': xs) ~ (y ': ys), Prj x xs ys) =>
+  Prj x (y ': xs) (y ': ys)
+  where
   prj _ (Here x) = Right (inj x)
   prj p (There xs) = There <$> prj p xs
 
@@ -106,23 +82,60 @@ data Tele a where
   PutStr :: String -> Tele ()
   GetLine :: Tele String
 
+deriving instance Show (Tele a)
+
+deriving instance Show (Print a)
+
+deriving instance Show (Reader a b)
+
+deriving instance (Show a) => Show (Writer a b)
+
+deriving instance (Show a) => Show (State a b)
+
 liftFree :: (Member f r) => f a -> FFree r a
 liftFree x = Impure (inj x) pure
 
-tPutStr :: (Member Tele r) => String -> FFree r ()
+data Print a where
+  Print :: (Show a) => a -> Print ()
+
+pPrint :: (Member Print r, Show a) => a -> FFree r ()
+pPrint = liftFree . Print
+
+runPrint ::
+  forall m rs a.
+  ( Member Print (Print ': rs),
+    Member m rs,
+    MonadIO m
+  ) =>
+  Proxy m ->
+  FFree (Print ': rs) a ->
+  FFree rs a
+runPrint _ (Pure x) = pure x
+runPrint p (Impure fx g) = case prj (Proxy :: Proxy Print) fx of
+  Left (Print x) -> liftFree (liftIO @m (print x)) >>= runPrint p . g
+  Right r -> Impure r (runPrint p . g)
+
+tPutStr, tPutStrLn :: (Member Tele r) => String -> FFree r ()
 tPutStr = liftFree . PutStr
+tPutStrLn s = tPutStr s >> tPutStr "\n"
 
 tGetLine :: (Member Tele r) => FFree r String
 tGetLine = liftFree GetLine
 
 runTele ::
-  FFree '[Tele] a ->
-  IO a
-runTele (Pure x) = pure x
-runTele (Impure fx g) = case prj (Proxy :: Proxy Tele) fx of
-  Left (PutStr s) -> putStr s >> runTele (g ())
-  Left GetLine -> getLine >>= runTele . g
-  Right _ -> error "unreachable"
+  forall m rs a.
+  ( Member Tele (Tele ': rs),
+    Member m rs,
+    MonadIO m
+  ) =>
+  Proxy m ->
+  FFree (Tele ': rs) a ->
+  FFree rs a
+runTele _ (Pure x) = pure x
+runTele p (Impure fx g) = case prj (Proxy :: Proxy Tele) fx of
+  Left (PutStr s) -> liftFree (liftIO @m (putStr s)) >>= runTele p . g
+  Left GetLine -> liftFree (liftIO @m getLine) >>= runTele p . g
+  Right r -> Impure r (runTele p . g)
 
 data Reader i x where
   Ask :: Reader i i
@@ -152,7 +165,7 @@ runWriter ::
   (Monoid o, Member (Writer o) (Writer o ': rs)) =>
   FFree (Writer o ': rs) a ->
   FFree rs (o, a)
-runWriter (Pure x) = pure (mempty, x)
+runWriter (Pure x) = (mempty,) <$> pure x
 runWriter (Impure fx g) = case prj (Proxy :: Proxy (Writer o)) fx of
   Left (Tell o) -> first (<> o) <$> runWriter (g ())
   Right r -> Impure r (runWriter <$> g)
@@ -186,29 +199,73 @@ run :: FFree '[] a -> a
 run (Pure x) = x
 run _ = error "unreachable"
 
-runM :: (Monad m) => FFree '[m] a -> m a
+runM :: forall m a. (Monad m) => FFree '[m] a -> m a
 runM (Pure x) = pure x
-runM (Impure fx g) = case prj (Proxy :: Proxy m) fx of
+runM (Impure fx g) = case prj (Proxy @m) fx of
   Left l -> l >>= runM . g
   Right _ -> error "unreachable"
 
--- testFunc :: (Members '[State Int, Reader Int, Writer String, Tele] r) => FFree r Int
+runWith ::
+  forall m0 m1 r a.
+  (Member m1 r) =>
+  (forall x. m0 x -> m1 x) ->
+  FFree (m0 ': r) a ->
+  FFree r a
+runWith _ (Pure x) = pure x
+runWith f (Impure fx g) = case prj (Proxy @m0) fx of
+  Left l -> liftFree (f l) >>= runWith f . g
+  Right r -> Impure r (runWith f . g)
+
+type family All (c :: k -> Constraint) (ks :: [k]) :: Constraint where
+  All _ '[] = ()
+  All c (x ': xs) = (c x, All c xs)
+
+testFunc ::
+  forall s.
+  FFree
+    '[ Reader Int,
+       State Int,
+       Writer String,
+       Print,
+       Tele,
+       ST s,
+       IO
+     ]
+    Int
 testFunc = do
+  tPutStrLn "Hello, what's your name?"
   x <- ask @Int
   y <- get @Int
   tell $ show (x + y)
   z <- tGetLine
   tPutStr z
   tPutStr "\n"
+  pPrint (123 :: Int)
   modify @Int (+ 10000)
   tell $ "Hello" ++ z
+  a <- liftFree @(ST s) $ newSTRef (1 :: Int)
+  a' <- liftFree $ readSTRef a
+  pPrint a'
+  liftFree $ modifySTRef a (+ 2)
+  b' <- liftFree $ readSTRef a
+  pPrint b'
+  a0 <- liftFree @(ST s) $ newSTRef ("wqeirjqw" :: String)
+  a0' <- liftFree $ readSTRef a0
+  tPutStrLn a0'
+  liftFree $ modifySTRef a0 tail
+  b0' <- liftFree $ readSTRef a0
+  liftFree $ putStrLn b0'
   get @Int
 
 someFunc :: IO ()
 someFunc = do
-  s <- runTele
-        . runWriter @String
-        . runState (456 :: Int)
-        . runReader (123 :: Int)
-        $ testFunc
+  s <-
+    runM
+      . runWith stToIO
+      . runTele (Proxy @IO)
+      . runPrint (Proxy @IO)
+      . runWriter @String
+      . runState (456 :: Int)
+      . runReader (123 :: Int)
+      $ testFunc
   print s
