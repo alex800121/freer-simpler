@@ -10,6 +10,7 @@ module Control.Monad.Freer.Internal
     liftFree,
     run,
     runM,
+    runWithS,
     natTransformWith,
     transformWithS,
     Inj (..),
@@ -113,6 +114,18 @@ natTransformWith f (Impure fx g) = case prj (Proxy :: Proxy f) fx of
   Left l -> liftFree (f l) >>= natTransformWith f . g
   Right r -> Impure r (natTransformWith f . g)
 
+runWithS ::
+  forall m a b r s.
+  (s -> a -> Eff r b) ->
+  (forall v. s -> m v -> (v -> Eff r b) -> Eff r b) ->
+  s ->
+  Eff (m ': r) a ->
+  Eff r b
+runWithS pureF _impureF s (Pure x) = pureF s x
+runWithS pureF impureF s (Impure fx g) = case prj (Proxy @m) fx of
+  Left l -> impureF s l (runWithS @m pureF impureF s . g)
+  Right r -> Impure r (runWithS @m pureF impureF s . g)
+
 transformWithS ::
   forall m0 m1 a r b s.
   (Member m1 r) =>
@@ -122,7 +135,7 @@ transformWithS ::
   Eff (m0 ': r) a ->
   Eff r b
 transformWithS pureF _impureF s (Pure x) = pureF s x
-transformWithS pureF impureF s (Impure fx g) = case prj (Proxy :: Proxy m0) fx of
+transformWithS pureF impureF s (Impure fx g) = case prj (Proxy @m0) fx of
   Left l -> impureF s l (transformWithS @m0 @m1 pureF impureF s . g)
   Right r -> Impure r (transformWithS @m0 @m1 pureF impureF s . g)
 

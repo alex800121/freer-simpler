@@ -9,7 +9,6 @@ module Control.Monad.Freer.Reader
 where
 
 import Control.Monad.Freer.Internal
-import Data.Proxy (Proxy (..))
 
 data Reader i x where
   Ask :: Reader i i
@@ -23,7 +22,13 @@ runReader ::
   i ->
   Eff (Reader i ': rs) a ->
   Eff rs a
-runReader _ (Pure x) = pure x
-runReader i (Impure fx g) = case prj (Proxy :: Proxy (Reader i)) fx of
-  Left Ask -> runReader i (g i)
-  Right r -> Impure r (runReader i <$> g)
+runReader =
+  runWithS
+    (const pure)
+    (\ i a f -> case a of
+        Ask -> f i
+    )
+-- runReader _ (Pure x) = pure x
+-- runReader i (Impure fx g) = case prj (Proxy :: Proxy (Reader i)) fx of
+--   Left Ask -> runReader i (g i)
+--   Right r -> Impure r (runReader i <$> g)
