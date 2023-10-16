@@ -11,7 +11,7 @@ cabal-version:      3.0
 --   http://haskell.org/cabal/users-guide/
 --
 -- The name of the package.
-name:               free
+name:               freer-simpler
 
 -- The package version.
 -- See the Haskell package versioning policy (PVP) for standards
@@ -59,10 +59,16 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  MyLib
+    exposed-modules:
+      Control.Monad.Freer,
+      Control.Monad.Freer.State,
+      Control.Monad.Freer.Writer,
+      Control.Monad.Freer.Reader,
+      Control.Monad.Freer.Tele
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules:
+      Control.Monad.Freer.Internal
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
@@ -102,4 +108,4 @@ test-suite free-test
     -- Test dependencies.
     build-depends:
         base ^>=4.17.1.0,
-        free
+        freer-simpler
