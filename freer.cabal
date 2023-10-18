@@ -64,6 +64,7 @@ library
       Control.Monad.Freer.State,
       Control.Monad.Freer.Writer,
       Control.Monad.Freer.Reader,
+      Control.Monad.Freer.Tagged,
       Control.Monad.Freer.Tele
 
     -- Modules included in this library but not exported.
@@ -83,7 +84,7 @@ library
     -- Base language which the package is written in.
     default-language: GHC2021
 
-test-suite free-test
+test-suite freer-simpler-test
     -- Import common warning flags.
     import:           warnings
 

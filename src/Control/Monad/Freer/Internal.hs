@@ -12,9 +12,9 @@ module Control.Monad.Freer.Internal
     runM,
     runWithS,
     natTransformWith,
-    transformWithS,
     Inj (..),
     Prj (..),
+    Union (..),
   )
 where
 
@@ -125,19 +125,6 @@ runWithS pureF _impureF s (Pure x) = pureF s x
 runWithS pureF impureF s (Impure fx g) = case prj (Proxy @m) fx of
   Left l -> impureF s l (runWithS @m pureF impureF s . g)
   Right r -> Impure r (runWithS @m pureF impureF s . g)
-
-transformWithS ::
-  forall m0 m1 a r b s.
-  (Member m1 r) =>
-  (s -> a -> Eff r b) ->
-  (forall v. s -> m0 v -> (v -> Eff r b) -> Eff r b) ->
-  s ->
-  Eff (m0 ': r) a ->
-  Eff r b
-transformWithS pureF _impureF s (Pure x) = pureF s x
-transformWithS pureF impureF s (Impure fx g) = case prj (Proxy @m0) fx of
-  Left l -> impureF s l (transformWithS @m0 @m1 pureF impureF s . g)
-  Right r -> Impure r (transformWithS @m0 @m1 pureF impureF s . g)
 
 type family All (c :: k -> Constraint) (ks :: [k]) :: Constraint where
   All _ '[] = ()

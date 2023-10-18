@@ -1,6 +1,6 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 
 module Control.Monad.Freer.Tele
   ( runTele,
@@ -13,7 +13,6 @@ module Control.Monad.Freer.Tele
 where
 
 import Control.Monad.Freer.Internal
-import Data.Proxy (Proxy (..))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 
 data Tele a where
@@ -38,8 +37,11 @@ runTele ::
   ) =>
   Eff (Tele ': rs) a ->
   Eff rs a
-runTele (Pure x) = pure x
-runTele (Impure fx g) = case prj (Proxy :: Proxy Tele) fx of
-  Left (PutStr s) -> liftFree (liftIO @m (putStr s)) >>= runTele @m . g
-  Left GetLine -> liftFree (liftIO @m getLine) >>= runTele @m . g
-  Right r -> Impure r (runTele @m . g)
+runTele =
+  runWithS
+    (const pure)
+    ( \_ a f -> case a of
+        PutStr s -> liftFree (liftIO @m (putStr s)) >>= f
+        GetLine -> liftFree (liftIO @m getLine) >>= f
+    )
+    ()

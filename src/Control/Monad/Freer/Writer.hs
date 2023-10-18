@@ -9,7 +9,6 @@ module Control.Monad.Freer.Writer
 where
 
 import Control.Monad.Freer.Internal
-import Data.Proxy (Proxy (..))
 import Data.Bifunctor (first)
 
 data Writer o x where
@@ -19,11 +18,13 @@ tell :: (Member (Writer o) r) => o -> Eff r ()
 tell = liftFree . Tell
 
 runWriter ::
-  forall o rs a.
-  (Monoid o, Member (Writer o) (Writer o ': rs)) =>
+  (Monoid o) =>
   Eff (Writer o ': rs) a ->
   Eff rs (o, a)
-runWriter (Pure x) = (mempty,) <$> pure x
-runWriter (Impure fx g) = case prj (Proxy :: Proxy (Writer o)) fx of
-  Left (Tell o) -> first (<> o) <$> runWriter (g ())
-  Right r -> Impure r (runWriter <$> g)
+runWriter =
+  runWithS
+    (\_ a -> pure (mempty, a))
+    ( \_ a f -> case a of
+        Tell o -> first (<> o) <$> f ()
+    )
+    ()

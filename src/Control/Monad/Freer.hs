@@ -7,7 +7,6 @@ module Control.Monad.Freer
     run,
     runM,
     natTransformWith,
-    transformWithS,
   )
 where
 
