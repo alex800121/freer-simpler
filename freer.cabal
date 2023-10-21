@@ -61,6 +61,7 @@ library
     -- Modules exported by the library.
     exposed-modules:
       Control.Monad.Freer,
+      Control.Monad.Freer.Internal,
       Control.Monad.Freer.State,
       Control.Monad.Freer.Writer,
       Control.Monad.Freer.Reader,
@@ -70,7 +71,6 @@ library
 
     -- Modules included in this library but not exported.
     other-modules:
-      Control.Monad.Freer.Internal
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

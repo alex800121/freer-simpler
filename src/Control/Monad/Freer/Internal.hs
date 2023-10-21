@@ -2,7 +2,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE LambdaCase #-}
 
 module Control.Monad.Freer.Internal
   ( Eff (..),
@@ -11,7 +10,7 @@ module Control.Monad.Freer.Internal
     Members,
     liftFree,
     run,
-    runM,
+    runFinalM,
     runWithS,
     runWith,
     natTransformWith,
@@ -103,10 +102,17 @@ run :: Eff '[] a -> a
 run (Pure x) = x
 run _ = error "unreachable"
 
-runM :: forall m a. (Monad m) => Eff '[m] a -> m a
-runM (Pure x) = pure x
-runM (Impure fx g) = case prj (Proxy @m) fx of
-  Left l -> l >>= runM . g
+
+-- runM :: forall r m a. (Monad m) => Eff (m ': r) a -> Eff r (m a)
+-- runM (Pure x) = pure (pure x)
+-- runM (Impure fx g) = case prj (Proxy @m) fx of
+--   Left l -> _a >>= runM . g
+--   Right r -> undefined
+
+runFinalM :: forall m a. (Monad m) => Eff '[m] a -> m a
+runFinalM (Pure x) = pure x
+runFinalM (Impure fx g) = case prj (Proxy @m) fx of
+  Left l -> l >>= runFinalM . g
   Right _ -> error "unreachable"
 
 natTransformWith ::
@@ -164,17 +170,11 @@ instance (Member NonDet r) => MonadFail (Eff r) where
 class (MonadPlus m) => MonadLogic m where
   msplit :: m a -> m (Maybe (a, m a))
   interleave :: m a -> m a -> m a
-  m0 `interleave` m1 = msplit m0 >>= \case
-    Nothing -> m1
-    Just (x, xs) -> pure x <|> (m1 `interleave` xs)
+  m0 `interleave` m1 = msplit m0 >>= maybe m1 (\(x, xs) -> pure x <|> (m1 `interleave` xs))
   (>>-) :: m a -> (a -> m b) -> m b
-  m0 >>- f = msplit m0 >>= \case
-    Nothing -> empty
-    Just (y, ys) -> f y `interleave` (ys >>- f)
+  m0 >>- f = msplit m0 >>= maybe empty (\(x, xs) -> f x `interleave` (xs >>- f))
   ifte :: m a -> (a -> m b) -> m b -> m b
-  ifte ma f mb = msplit ma >>= \case
-    Nothing -> mb
-    Just (x, xs) -> f x <|> (xs >>= f)
+  ifte ma f mb = msplit ma >>= maybe mb (\(x, xs) -> f x <|> (xs >>= f))
 
 instance (Member NonDet r) => MonadLogic (Eff r) where
   msplit ::

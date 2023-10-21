@@ -5,7 +5,7 @@ module Control.Monad.Freer
     Members,
     liftFree,
     run,
-    runM,
+    runFinalM,
     natTransformWith,
   )
 where
