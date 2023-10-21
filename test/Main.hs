@@ -1,31 +1,24 @@
 {-# LANGUAGE DataKinds #-}
-
 module Main (main) where
 
+import Control.Applicative (Alternative (..))
+import Control.Monad (MonadPlus (..))
 import Control.Monad.Freer
+import Control.Monad.Freer.NonDet
 import Control.Monad.Freer.Reader
 import Control.Monad.Freer.Tagged
 import Control.Monad.Freer.Tele
 import Data.Proxy (Proxy (..))
 
-instance HasTagged "Hello" (Reader Int)
-instance HasTagged "World" (Reader String)
-
 main :: IO ()
 main =
-  runM
-    . runTele @IO
-    . runReader (456 :: Int)
-    . runTagged (Proxy @"Hello") (runReader 123)
-    . runTagged (Proxy @"World") (runReader "World")
+  print
+    . run
+    . runTagged @"World" (runReader @Int 12)
+    . runTagged @"Hello" (runReader @Int 11)
+    . runReader @Int 0
     $ do
-      i <- tagged @"Hello" $ ask @Int
-      tPrint i
-      a <- tagged @"World" $ ask @String
-      tPutStrLn a
-      j <- ask @Int
-      tPrint j
-      k <- tagged @"Hello" $ ask @Int
-      tPrint k
-      l <- ask @Int
-      tPrint l
+      i0 <- tagged @"Hello" @(Reader Int) $ ask @Int
+      i2 <- ask @Int
+      i1 <- tagged @"World" @(Reader Int) $ ask @Int
+      return (i0, i1, i2)

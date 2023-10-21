@@ -2,23 +2,28 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Control.Monad.Freer.Internal
   ( Eff (..),
+    MonadLogic (..),
     Member,
     Members,
     liftFree,
     run,
     runM,
     runWithS,
+    runWith,
     natTransformWith,
     Inj (..),
     Prj (..),
     Union (..),
+    NonDet (..),
   )
 where
 
-import Control.Monad ((>=>))
+import Control.Applicative (Alternative (..))
+import Control.Monad (MonadPlus (..), (>=>))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
@@ -114,6 +119,17 @@ natTransformWith f (Impure fx g) = case prj (Proxy :: Proxy f) fx of
   Left l -> liftFree (f l) >>= natTransformWith f . g
   Right r -> Impure r (natTransformWith f . g)
 
+runWith ::
+  forall m a b r.
+  (a -> Eff r b) ->
+  (forall v. m v -> (v -> Eff r b) -> Eff r b) ->
+  Eff (m ': r) a ->
+  Eff r b
+runWith pureF _impureF (Pure x) = pureF x
+runWith pureF impureF (Impure fx g) = case prj (Proxy @m) fx of
+  Left l -> impureF l (runWith @m pureF impureF . g)
+  Right r -> Impure r (runWith @m pureF impureF . g)
+
 runWithS ::
   forall m a b r s.
   (s -> a -> Eff r b) ->
@@ -129,3 +145,48 @@ runWithS pureF impureF s (Impure fx g) = case prj (Proxy @m) fx of
 type family All (c :: k -> Constraint) (ks :: [k]) :: Constraint where
   All _ '[] = ()
   All c (x ': xs) = (c x, All c xs)
+
+data NonDet a where
+  MZero :: NonDet a
+  MPlus :: NonDet Bool
+
+instance (Member NonDet r) => Alternative (Eff r) where
+  empty = mzero
+  (<|>) = mplus
+
+instance (Member NonDet r) => MonadPlus (Eff r) where
+  mzero = liftFree MZero
+  mplus m0 m1 = liftFree MPlus >>= \x -> if x then m0 else m1
+
+instance (Member NonDet r) => MonadFail (Eff r) where
+  fail _ = empty
+
+class (MonadPlus m) => MonadLogic m where
+  msplit :: m a -> m (Maybe (a, m a))
+  interleave :: m a -> m a -> m a
+  m0 `interleave` m1 = msplit m0 >>= \case
+    Nothing -> m1
+    Just (x, xs) -> pure x <|> (m1 `interleave` xs)
+  (>>-) :: m a -> (a -> m b) -> m b
+  m0 >>- f = msplit m0 >>= \case
+    Nothing -> empty
+    Just (y, ys) -> f y `interleave` (ys >>- f)
+  ifte :: m a -> (a -> m b) -> m b -> m b
+  ifte ma f mb = msplit ma >>= \case
+    Nothing -> mb
+    Just (x, xs) -> f x <|> (xs >>= f)
+
+instance (Member NonDet r) => MonadLogic (Eff r) where
+  msplit ::
+    (Member NonDet r) =>
+    Eff r a ->
+    Eff r (Maybe (a, Eff r a))
+  msplit (Pure a) = pure (Just (a, empty))
+  msplit (Impure fx g) = case prj (Proxy @NonDet) fx of
+    Left MZero -> pure Nothing
+    Left MPlus -> do
+      trueBranch <- msplit $ g True
+      case trueBranch of
+        Just (x, xs) -> pure $ Just (x, xs <|> g False)
+        Nothing -> msplit $ g False
+    Right _ -> Impure fx (msplit . g)

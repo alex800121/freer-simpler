@@ -65,6 +65,7 @@ library
       Control.Monad.Freer.Writer,
       Control.Monad.Freer.Reader,
       Control.Monad.Freer.Tagged,
+      Control.Monad.Freer.NonDet,
       Control.Monad.Freer.Tele
 
     -- Modules included in this library but not exported.
