@@ -10,9 +10,11 @@ module Control.Monad.Freer.Internal
     Members,
     liftFree,
     run,
-    runFinalM,
+    runM,
+    runT,
     runWithS,
     runWith,
+    dropEff,
     natTransformWith,
     Inj (..),
     Prj (..),
@@ -22,7 +24,7 @@ module Control.Monad.Freer.Internal
 where
 
 import Control.Applicative (Alternative (..))
-import Control.Monad (MonadPlus (..), (>=>))
+import Control.Monad (MonadPlus (..), join, (>=>))
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
@@ -102,17 +104,16 @@ run :: Eff '[] a -> a
 run (Pure x) = x
 run _ = error "unreachable"
 
+runT :: forall r m a. (Monad m, Traversable m) => Eff (m ': r) a -> Eff r (m a)
+runT (Pure x) = pure (pure x)
+runT (Impure fx g) = case prj (Proxy @m) fx of
+  Left l -> join <$> mapM (runT . g) l
+  Right r -> Impure r (runT . g)
 
--- runM :: forall r m a. (Monad m) => Eff (m ': r) a -> Eff r (m a)
--- runM (Pure x) = pure (pure x)
--- runM (Impure fx g) = case prj (Proxy @m) fx of
---   Left l -> _a >>= runM . g
---   Right r -> undefined
-
-runFinalM :: forall m a. (Monad m) => Eff '[m] a -> m a
-runFinalM (Pure x) = pure x
-runFinalM (Impure fx g) = case prj (Proxy @m) fx of
-  Left l -> l >>= runFinalM . g
+runM :: forall m a. (Monad m) => Eff '[m] a -> m a
+runM (Pure x) = pure x
+runM (Impure fx g) = case prj (Proxy @m) fx of
+  Left l -> l >>= runM . g
   Right _ -> error "unreachable"
 
 natTransformWith ::
@@ -124,6 +125,12 @@ natTransformWith _ (Pure x) = pure x
 natTransformWith f (Impure fx g) = case prj (Proxy :: Proxy f) fx of
   Left l -> liftFree (f l) >>= natTransformWith f . g
   Right r -> Impure r (natTransformWith f . g)
+
+dropEff :: forall f r a. (forall x. f x -> x) -> Eff (f ': r) a -> Eff r a
+dropEff _ (Pure x) = pure x
+dropEff f (Impure fx g) = case prj (Proxy @f) fx of
+  Left l -> dropEff f (g (f l))
+  Right r -> Impure r (dropEff f . g)
 
 runWith ::
   forall m a b r.
