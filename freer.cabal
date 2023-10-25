@@ -60,14 +60,15 @@ library
 
     -- Modules exported by the library.
     exposed-modules:
-      Control.Monad.Freer,
-      Control.Monad.Freer.Internal,
-      Control.Monad.Freer.State,
-      Control.Monad.Freer.Writer,
-      Control.Monad.Freer.Reader,
-      Control.Monad.Freer.Tagged,
-      Control.Monad.Freer.NonDet,
-      Control.Monad.Freer.Tele
+      Control.Monad.Freer.Internal
+      -- Control.Monad.Freer,
+      -- Control.Monad.Freer.Internal,
+      -- Control.Monad.Freer.State,
+      -- Control.Monad.Freer.Writer,
+      -- Control.Monad.Freer.Reader,
+      -- Control.Monad.Freer.Tagged,
+      -- Control.Monad.Freer.NonDet,
+      -- Control.Monad.Freer.Tele
 
     -- Modules included in this library but not exported.
     other-modules:
